@@ -36,6 +36,7 @@ const PENSION_RULE_CATEGORIES = [
   { key: "60", label: "BUP 60", color: "#facc15" },
   { key: "65", label: "BUP 65", color: "#22c55e" }
 ];
+const DEFAULT_DASHBOARD_CACHE_TTL_MS = 30000;
 const MONTH_LOOKUP = {
   JAN: 1,
   JANUARY: 1,
@@ -73,6 +74,60 @@ const MONTH_LOOKUP = {
   DESEMBER: 12,
   DECEMBER: 12
 };
+
+function getDashboardCacheTtlMs() {
+  const ttl = Number(process.env.DASHBOARD_CACHE_TTL_MS ?? DEFAULT_DASHBOARD_CACHE_TTL_MS);
+  if (!Number.isFinite(ttl)) return DEFAULT_DASHBOARD_CACHE_TTL_MS;
+  return Math.min(300000, Math.max(0, Math.floor(ttl)));
+}
+
+function getDashboardCache() {
+  if (!globalThis.__sisdmkDashboardPayloadCache) {
+    globalThis.__sisdmkDashboardPayloadCache = new Map();
+  }
+  return globalThis.__sisdmkDashboardPayloadCache;
+}
+
+function createDashboardCacheKey(user, detail, statusFilter, wilayahFilter) {
+  return [
+    user?.role,
+    user?.id,
+    user?.username,
+    user?.nama_ukpd,
+    user?.wilayah,
+    detail,
+    statusFilter,
+    wilayahFilter
+  ].map((value) => encodeURIComponent(String(value || ""))).join("|");
+}
+
+function getCachedDashboardPayload(cacheKey) {
+  const ttl = getDashboardCacheTtlMs();
+  if (ttl <= 0) return null;
+
+  const cache = getDashboardCache();
+  const entry = cache.get(cacheKey);
+  if (!entry) return null;
+  if (Date.now() - entry.createdAt > ttl) {
+    cache.delete(cacheKey);
+    return null;
+  }
+  return entry.payload;
+}
+
+function setCachedDashboardPayload(cacheKey, payload) {
+  const ttl = getDashboardCacheTtlMs();
+  if (ttl <= 0) return;
+
+  const cache = getDashboardCache();
+  if (cache.size > 100) {
+    const now = Date.now();
+    for (const [key, entry] of cache.entries()) {
+      if (now - entry.createdAt > ttl || cache.size > 80) cache.delete(key);
+    }
+  }
+  cache.set(cacheKey, { createdAt: Date.now(), payload });
+}
 
 const CHART_VIEW_CONFIGS = {
   statusPegawai: {
@@ -946,6 +1001,10 @@ export async function GET(request) {
 
     const detail = request?.nextUrl?.searchParams?.get("detail") || "summary";
     const statusFilter = normalizeDashboardStatusFilter(request?.nextUrl?.searchParams?.get("status"));
+    const wilayahInput = request?.nextUrl?.searchParams?.get("wilayah") || "all";
+    const cacheKey = createDashboardCacheKey(user, detail, statusFilter, wilayahInput);
+    const cachedPayload = getCachedDashboardPayload(cacheKey);
+    if (cachedPayload) return ok(cachedPayload);
 
     const { data, ukpdList } = await getScopedDashboardData(user);
 
@@ -954,6 +1013,7 @@ export async function GET(request) {
         analytics: buildDashboardAnalytics(data, ukpdList)
       };
 
+      setCachedDashboardPayload(cacheKey, payload);
       return ok(payload);
     }
 
@@ -964,7 +1024,7 @@ export async function GET(request) {
       ? buildDashboardMenuWilayahOptions(baseChartItems, ukpdList)
       : [];
     const wilayahFilter = normalizeDashboardWilayahFilter(
-      request?.nextUrl?.searchParams?.get("wilayah"),
+      wilayahInput,
       dashboardMenuWilayahOptions,
       user
     );
@@ -1003,6 +1063,7 @@ export async function GET(request) {
       }
     };
 
+    setCachedDashboardPayload(cacheKey, payload);
     return ok(payload);
   } catch (error) {
     console.error("Dashboard API error:", error);

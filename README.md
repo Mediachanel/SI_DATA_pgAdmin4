@@ -6,10 +6,150 @@ MVP aplikasi kepegawaian internal berbasis Next.js App Router, Tailwind CSS, JWT
 
 ```bash
 npm install
+npm test
 npm run dev
 ```
 
 Aplikasi berjalan di `http://localhost:3000`.
+
+## Phase 1 Core SI SDMK
+
+Branch pengembangan bertahap HRIS/AI Agent dimulai dari `feature/ai-agent-roadmap`. Backup sebelum perubahan Phase 1 dibuat di `backup/pre-ai-agent-roadmap-phase1-2026-05-11`.
+
+Audit struktur dan risiko awal ada di [Phase 1 Audit](docs/phase-1-audit.md).
+
+Perubahan Phase 1 berfokus pada fondasi aman tanpa mengganti seluruh data layer:
+
+- RBAC pegawai dipusatkan di `src/lib/rbac/scope.js`.
+- Validasi dan sanitasi payload pegawai ditambahkan di `src/lib/validation/pegawai.js`.
+- Audit log CRUD pegawai dan security event disiapkan ke tabel `audit_logs`.
+- Migration PostgreSQL/Prisma baseline tersedia di `prisma/migrations/202605110001_phase1_core_rbac_audit/migration.sql`.
+- Prisma schema awal tersedia sebagai kontrak bertahap di `prisma/schema.prisma`; runtime aplikasi masih memakai `pg` agar kompatibel dengan fitur lama.
+- Seed role dan Super Admin awal memakai env variable melalui `npm run seed:phase1`.
+- Test minimal auth dan RBAC memakai Node test runner melalui `npm test`.
+
+### Menjalankan Migration Phase 1
+
+Jika Prisma CLI sudah tersedia di environment Anda, jalankan:
+
+```bash
+npx prisma migrate deploy
+```
+
+Tanpa Prisma CLI, migration SQL bisa dijalankan langsung ke PostgreSQL:
+
+```bash
+psql "$DATABASE_URL" -f prisma/migrations/202605110001_phase1_core_rbac_audit/migration.sql
+```
+
+Untuk Docker compose satu stack:
+
+```bash
+docker exec -i sisdmk2-db psql -U "$POSTGRES_USER" -d si_data < prisma/migrations/202605110001_phase1_core_rbac_audit/migration.sql
+```
+
+### Seed User dan Role Awal
+
+Jangan hardcode password. Set password dari env:
+
+```bash
+SEED_SUPER_ADMIN_USERNAME=superadmin SEED_SUPER_ADMIN_PASSWORD="password-kuat-minimal-12" npm run seed:phase1
+```
+
+Script ini mengisi `roles` dan `app_users`. Login lama dari tabel `ukpd` tetap dipertahankan pada Phase 1 supaya fitur existing tidak putus.
+
+### Env Wajib Roadmap
+
+Minimal env untuk roadmap bertahap:
+
+```env
+DATABASE_URL=postgresql://sisdmk2_user:CHANGE_ME@127.0.0.1:5432/si_data?schema=public
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=5432
+POSTGRES_USER=sisdmk2_user
+POSTGRES_PASSWORD=CHANGE_ME
+POSTGRES_DATABASE=si_data
+JWT_SECRET=CHANGE_ME_MIN_32_CHARS
+NEXTAUTH_SECRET=
+APP_URL=http://localhost:3000
+APP_ORIGIN=http://localhost:3000
+STORAGE_PROVIDER=local
+STORAGE_LOCAL_PATH=./storage
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+AI_ASSISTANT_PROVIDER=local
+AI_DOCUMENT_CLASSIFIER_PROVIDER=mock
+AI_DOCUMENT_MAX_BYTES=10485760
+WHATSAPP_VERIFY_TOKEN=
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_GRAPH_VERSION=v20.0
+CHATBOT_AUTO_REPLY=false
+```
+
+### Cara Test Phase 1
+
+```bash
+npm test
+npm run check:postgres
+npm run dev
+```
+
+Uji manual yang disarankan:
+
+- Login sebagai Super Admin, Admin Wilayah, dan Admin UKPD.
+- Pastikan Admin UKPD hanya melihat/mengubah pegawai UKPD sendiri.
+- Pastikan Admin Wilayah hanya melihat/mengubah pegawai wilayahnya.
+- Coba input nama pegawai dengan karakter HTML seperti `<script>` dan pastikan payload tersanitasi.
+- Buat, ubah, dan hapus data pegawai lalu cek tabel `audit_logs`.
+
+Test upload dan AI extraction belum diaktifkan di Phase 1 karena termasuk Phase 2. Kontrak env dan storage sudah disiapkan agar Phase 2 bisa masuk tanpa membongkar ulang fondasi.
+
+## Roadmap AI HRIS
+
+Migration bertahap setelah Phase 1:
+
+```bash
+npm run migrate:phase2
+npm run migrate:phase3
+npm run migrate:phase4
+npm run migrate:phase5
+npm run migrate:phase6
+npm run migrate:phase7
+npm run migrate:phase8
+npm test
+npm run lint
+npm run build
+```
+
+Ringkasan modul roadmap:
+
+- Phase 2 `ai-documents`: upload PDF/gambar/DOCX/Excel, validasi MIME/ekstensi/ukuran/nama file, storage lokal, tabel `ai_documents`, `ai_extraction_results`, `ai_validation_queue`, klasifikasi dokumen, extraction metadata draft, confidence score, catatan AI, dan halaman review admin di `/ai-documents`.
+- Phase 3 `chatbot`: webhook resmi WhatsApp Business Cloud API di `/api/chatbot/whatsapp`, tabel `chat_sessions`, `chat_messages`, `chatbot_intents`, intent awal, masking data pribadi, handoff admin, dan dashboard monitoring `/chatbot`.
+- Phase 4 `ai-agent`: tools resmi terbatas, permission check role, blokir instruksi SQL mentah, masking NIK/NIP/telepon, task approval, audit log AI, dan halaman `/ai-agent`.
+- Phase 5 chat split: public chat di halaman login hanya membaca `public_qna_knowledge_base`, internal AI chat di `/ai-assistant` memakai session user dan permission guard, monitoring public chat di `/admin/public-chat`, QnA admin di `/admin/qna-knowledge-base`, task queue di `/ai-agent/tasks`, dan audit log di `/ai-agent/audit-log`.
+- Cutover n8n (15 Mei 2026): jalur AI internal lama, public chat lama, chatbot WhatsApp lama, AI agent approval lama, dan workflow engine internal lama dinonaktifkan dengan HTTP 410.
+
+### AI n8n Workflow
+
+Jalur AI aktif sekarang adalah bridge Next.js ke n8n:
+
+- `POST /api/ai/chat`: chat internal setelah login, mengirim user dan role scope ke webhook `N8N_WEBHOOK_URL`.
+- `POST /api/ai/public-chat`: chat publik login page, mengirim pesan ke `N8N_PUBLIC_WEBHOOK_URL`.
+- `POST /api/internal-ai/tools/employee-count`: tool database resmi untuk hitung pegawai.
+- `POST /api/internal-ai/tools/search-employee`: tool database resmi untuk pencarian pegawai.
+- `POST /api/internal-ai/tools/dashboard-summary`: tool ringkasan dashboard.
+- `POST /api/internal-ai/tools/employee-profile`: tool profil pegawai lintas tabel dengan allowlist section/field. Kirim `user`, `query`/`id_pegawai`, `sections`, dan `fields`; backend hanya mengembalikan kolom yang diminta serta tetap memasking NIK/NIP/NRK/nomor kontak.
+- `POST /api/internal-ai/tools/public-qna`: tool QnA publik.
+
+Semua tool internal n8n wajib mengirim header `x-ai-secret` yang cocok dengan `N8N_API_SECRET`. Chat internal tetap membaca HRIS sesuai role: Super Admin semua data, Admin Wilayah hanya wilayah sendiri, dan Admin UKPD hanya UKPD sendiri.
+
+Endpoint lama seperti `/api/internal-chat`, `/api/public-chat`, `/api/ai-agent`, `/api/ai-workflows`, dan webhook chatbot lama tidak lagi menjalankan AI lokal. Endpoint tersebut hanya menjadi penutup eksplisit agar tidak ada fallback tersembunyi ke orchestrator atau service AI lama.
+
+AI document classifier memakai provider `mock` secara default agar aman untuk lokal/test. Untuk memakai OpenAI, set `AI_DOCUMENT_CLASSIFIER_PROVIDER=openai`, `OPENAI_API_KEY`, dan `OPENAI_MODEL` tanpa hardcode secret.
+
+Panduan production deployment, backup, restore, dan redeploy aman ada di [Production Deployment](docs/production-deployment.md).
 
 ## Pakai Database Offline Lokal
 
@@ -61,7 +201,7 @@ Ada dua skenario. Pilih salah satu, jangan dicampur:
 
 ### Deploy cepat dari CasaOS via GitHub
 
-Alur ini mengikuti pola PasarKita: jalankan script dari terminal CasaOS/DietPi, lalu server akan pull GitHub, build container, cek database `si_data`, dan start app. PasarKita tidak disentuh.
+Jalankan script dari terminal CasaOS/DietPi, lalu server akan pull GitHub, build container, cek database `si_data`, dan start app.
 
 ```bash
 mkdir -p /DATA/AppData/si-kepegawaian
@@ -72,10 +212,10 @@ sh deploy-casaos-github.sh \
   --force-env \
   --app-port 8091 \
   --app-origin https://dinkes.kepegawaian.media \
-  --postgres-container pasarkita-postgres \
-  --postgres-admin-user pasarkita \
-  --postgres-user pasarkita \
-  --postgres-password 'PASSWORD_POSTGRES_PASARKITA' \
+  --postgres-container sisdmk-postgres \
+  --postgres-admin-user sisdmk_admin \
+  --postgres-user sisdmk_admin \
+  --postgres-password 'PASSWORD_POSTGRES_SISDMK' \
   --postgres-database si_data
 ```
 
@@ -86,10 +226,10 @@ sh deploy-casaos-github.sh \
   --force-env \
   --app-port 8091 \
   --app-origin https://dinkes.kepegawaian.media \
-  --postgres-container pasarkita-postgres \
-  --postgres-admin-user pasarkita \
-  --postgres-user pasarkita \
-  --postgres-password 'PASSWORD_POSTGRES_PASARKITA' \
+  --postgres-container sisdmk-postgres \
+  --postgres-admin-user sisdmk_admin \
+  --postgres-user sisdmk_admin \
+  --postgres-password 'PASSWORD_POSTGRES_SISDMK' \
   --postgres-database si_data \
   --restore-dump /DATA/Downloads/si_data.pg16.sql.tgz
 ```
@@ -97,6 +237,16 @@ sh deploy-casaos-github.sh \
 Detail lengkap ada di [CasaOS Deployment](docs/CASAOS.md).
 
 ### Skenario A: Pakai PostgreSQL CasaOS/server yang sudah ada
+
+Konfigurasi server aktif:
+
+```text
+Sistem     : PostgreSQL
+Server     : sisdmk-postgres
+Pengguna   : sisdmk_admin
+Sandi      : nilai POSTGRES_PASSWORD dari env server
+Basis data : si_data
+```
 
 Pastikan database `si_data` bisa diakses dari container lewat host yang diset di `POSTGRES_HOST`/`POSTGRES_HOSTS`. Untuk skenario ini, pakai `docker-compose.casaos.yml`.
 

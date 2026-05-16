@@ -10,32 +10,58 @@ services:
       NODE_ENV: production
       PORT: 3000
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      APP_URL: ${APP_URL:-http://localhost:3000}
       APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN in .env, for example https://sisdmk.example.go.id}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/app/storage}
+      AI_ENABLE_N8N: ${AI_ENABLE_N8N:-true}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+      N8N_PUBLIC_WEBHOOK_URL: ${N8N_PUBLIC_WEBHOOK_URL:-}
+      N8N_API_SECRET: ${N8N_API_SECRET:-}
+      N8N_WEBHOOK_TIMEOUT_MS: ${N8N_WEBHOOK_TIMEOUT_MS:-20000}
+      N8N_WEBHOOK_RETRIES: ${N8N_WEBHOOK_RETRIES:-1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       ALLOW_INSECURE_LOCAL_HTTP: ${ALLOW_INSECURE_LOCAL_HTTP:-false}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      POSTGRES_HOST: ${POSTGRES_HOST:-pasir-postgres}
-      POSTGRES_HOSTS: ${POSTGRES_HOSTS:-pasir-postgres}
+      POSTGRES_HOST: ${POSTGRES_HOST:-sisdmk-postgres}
+      POSTGRES_HOSTS: ${POSTGRES_HOSTS:-sisdmk-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       POSTGRES_DATABASE: ${POSTGRES_DATABASE:-si_data}
       POSTGRES_DATABASES: ${POSTGRES_DATABASES:-si_data}
-      POSTGRES_USER: ${POSTGRES_USER:-sisdmk2_user}
+      POSTGRES_USER: ${POSTGRES_USER:-sisdmk_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_CONNECT_TIMEOUT_MS: ${POSTGRES_CONNECT_TIMEOUT_MS:-1500}
+      POSTGRES_IDLE_TIMEOUT_MS: ${POSTGRES_IDLE_TIMEOUT_MS:-30000}
+      POSTGRES_POOL_MAX: ${POSTGRES_POOL_MAX:-10}
+      POSTGRES_POOL_VERIFY_INTERVAL_MS: ${POSTGRES_POOL_VERIFY_INTERVAL_MS:-15000}
+      POSTGRES_APPLICATION_NAME: ${POSTGRES_APPLICATION_NAME:-sisdmk2-app}
+      DASHBOARD_CACHE_TTL_MS: ${DASHBOARD_CACHE_TTL_MS:-30000}
+      DASHBOARD_DATA_CACHE_TTL_MS: ${DASHBOARD_DATA_CACHE_TTL_MS:-30000}
     ports:
       - "${APP_BIND_HOST:-127.0.0.1}:${APP_PORT:-8080}:3000"
     volumes:
       - ./storage:/app/storage
-    read_only: true
     tmpfs:
       - /tmp
+      - /app/.next/cache:uid=1000,gid=1000,mode=1770
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     init: true
     pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     networks:
       - sisdmk2-network
 

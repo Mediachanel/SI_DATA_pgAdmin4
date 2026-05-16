@@ -10,17 +10,30 @@ APP_ORIGIN="${APP_ORIGIN:-}"
 JWT_SECRET="${JWT_SECRET:-}"
 ALLOW_INSECURE_LOCAL_HTTP="${ALLOW_INSECURE_LOCAL_HTTP:-}"
 COOKIE_SECURE="${COOKIE_SECURE:-}"
+AI_ENABLE_N8N="${AI_ENABLE_N8N:-true}"
+N8N_WEBHOOK_URL="${N8N_WEBHOOK_URL:-}"
+N8N_PUBLIC_WEBHOOK_URL="${N8N_PUBLIC_WEBHOOK_URL:-}"
+N8N_API_SECRET="${N8N_API_SECRET:-}"
+N8N_WEBHOOK_TIMEOUT_MS="${N8N_WEBHOOK_TIMEOUT_MS:-20000}"
+N8N_WEBHOOK_RETRIES="${N8N_WEBHOOK_RETRIES:-1}"
+TRUST_PROXY_HEADERS="${TRUST_PROXY_HEADERS:-true}"
 NETWORK_NAME="${NETWORK_NAME:-sisdmk2-network}"
-POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-pasir-postgres}"
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-sisdmk-postgres}"
 POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER:-}"
 POSTGRES_DATABASE="${POSTGRES_DATABASE:-si_data}"
 POSTGRES_DATABASES="${POSTGRES_DATABASES:-si_data}"
-POSTGRES_USER="${POSTGRES_USER:-postgres}"
+POSTGRES_USER="${POSTGRES_USER:-sisdmk_admin}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 POSTGRES_HOST="${POSTGRES_HOST:-$POSTGRES_CONTAINER}"
 POSTGRES_HOSTS="${POSTGRES_HOSTS:-$POSTGRES_CONTAINER,host.docker.internal,172.17.0.1,postgres,db,127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_CONNECT_TIMEOUT_MS="${POSTGRES_CONNECT_TIMEOUT_MS:-1500}"
+POSTGRES_IDLE_TIMEOUT_MS="${POSTGRES_IDLE_TIMEOUT_MS:-30000}"
+POSTGRES_POOL_MAX="${POSTGRES_POOL_MAX:-10}"
+POSTGRES_POOL_VERIFY_INTERVAL_MS="${POSTGRES_POOL_VERIFY_INTERVAL_MS:-15000}"
+POSTGRES_APPLICATION_NAME="${POSTGRES_APPLICATION_NAME:-sisdmk2-app}"
+DASHBOARD_CACHE_TTL_MS="${DASHBOARD_CACHE_TTL_MS:-30000}"
+DASHBOARD_DATA_CACHE_TTL_MS="${DASHBOARD_DATA_CACHE_TTL_MS:-30000}"
 ENSURE_DATABASE="${ENSURE_DATABASE:-1}"
 RESTORE_DUMP="${RESTORE_DUMP:-}"
 RESTORE_USER="${RESTORE_USER:-}"
@@ -50,11 +63,18 @@ Options:
   --app-port PORT             Port host untuk aplikasi, default 3000
   --app-origin URL            URL publik aplikasi, contoh https://info.kepegawaian.media
   --jwt-secret VALUE          JWT secret production
+  --ai-enable-n8n true|false  Aktifkan bridge AI n8n, default true
+  --n8n-webhook-url URL       Webhook n8n untuk chat internal
+  --n8n-public-webhook-url URL Webhook n8n untuk chat publik
+  --n8n-api-secret VALUE      Secret header x-ai-secret untuk n8n dan tool internal
+  --n8n-webhook-timeout-ms MS Timeout webhook n8n, default 20000
+  --n8n-webhook-retries N     Retry webhook n8n, default 1
+  --trust-proxy-headers true|false Percaya header Cloudflare/proxy, default true
   --network-name NAME         Docker network untuk app dan PostgreSQL
-  --postgres-container NAME   Nama container PostgreSQL, default pasir-postgres
+  --postgres-container NAME   Nama container PostgreSQL, default sisdmk-postgres
   --postgres-admin-user NAME  User admin PostgreSQL untuk membuat database
   --postgres-database NAME    Nama database aplikasi, default si_data
-  --postgres-user NAME        User database aplikasi, default postgres
+  --postgres-user NAME        User database aplikasi, default sisdmk_admin
   --postgres-password VALUE   Password user database aplikasi
   --skip-db-create            Jangan buat database PostgreSQL otomatis
   --restore-dump PATH         Restore dump .sql/.tgz yang sudah ada di server
@@ -103,6 +123,41 @@ while [ $# -gt 0 ]; do
     --jwt-secret)
       need_value "$@"
       JWT_SECRET="$2"
+      shift 2
+      ;;
+    --ai-enable-n8n)
+      need_value "$@"
+      AI_ENABLE_N8N="$2"
+      shift 2
+      ;;
+    --n8n-webhook-url)
+      need_value "$@"
+      N8N_WEBHOOK_URL="$2"
+      shift 2
+      ;;
+    --n8n-public-webhook-url)
+      need_value "$@"
+      N8N_PUBLIC_WEBHOOK_URL="$2"
+      shift 2
+      ;;
+    --n8n-api-secret)
+      need_value "$@"
+      N8N_API_SECRET="$2"
+      shift 2
+      ;;
+    --n8n-webhook-timeout-ms)
+      need_value "$@"
+      N8N_WEBHOOK_TIMEOUT_MS="$2"
+      shift 2
+      ;;
+    --n8n-webhook-retries)
+      need_value "$@"
+      N8N_WEBHOOK_RETRIES="$2"
+      shift 2
+      ;;
+    --trust-proxy-headers)
+      need_value "$@"
+      TRUST_PROXY_HEADERS="$2"
       shift 2
       ;;
     --network-name)
@@ -261,9 +316,17 @@ write_env_file() {
   cat > "$env_file" <<ENV
 APP_PORT=$APP_PORT
 JWT_SECRET=$JWT_SECRET
+APP_URL=$APP_ORIGIN
 APP_ORIGIN=$APP_ORIGIN
 ALLOW_INSECURE_LOCAL_HTTP=$ALLOW_INSECURE_LOCAL_HTTP
 COOKIE_SECURE=$COOKIE_SECURE
+TRUST_PROXY_HEADERS=$TRUST_PROXY_HEADERS
+AI_ENABLE_N8N=$AI_ENABLE_N8N
+N8N_WEBHOOK_URL=$N8N_WEBHOOK_URL
+N8N_PUBLIC_WEBHOOK_URL=$N8N_PUBLIC_WEBHOOK_URL
+N8N_API_SECRET=$N8N_API_SECRET
+N8N_WEBHOOK_TIMEOUT_MS=$N8N_WEBHOOK_TIMEOUT_MS
+N8N_WEBHOOK_RETRIES=$N8N_WEBHOOK_RETRIES
 POSTGRES_HOST=$POSTGRES_HOST
 POSTGRES_HOSTS=$POSTGRES_HOSTS
 POSTGRES_PORT=$POSTGRES_PORT
@@ -272,6 +335,12 @@ POSTGRES_DATABASES=$POSTGRES_DATABASES
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_CONNECT_TIMEOUT_MS=$POSTGRES_CONNECT_TIMEOUT_MS
+POSTGRES_IDLE_TIMEOUT_MS=$POSTGRES_IDLE_TIMEOUT_MS
+POSTGRES_POOL_MAX=$POSTGRES_POOL_MAX
+POSTGRES_POOL_VERIFY_INTERVAL_MS=$POSTGRES_POOL_VERIFY_INTERVAL_MS
+POSTGRES_APPLICATION_NAME=$POSTGRES_APPLICATION_NAME
+DASHBOARD_CACHE_TTL_MS=$DASHBOARD_CACHE_TTL_MS
+DASHBOARD_DATA_CACHE_TTL_MS=$DASHBOARD_DATA_CACHE_TTL_MS
 ENV
 
   log "Menulis env: $env_file"
@@ -321,7 +390,7 @@ postgres_can_connect() {
 }
 
 pick_admin_user() {
-  for candidate in "$POSTGRES_ADMIN_USER" "$POSTGRES_USER" postgres pasarkita; do
+  for candidate in "$POSTGRES_ADMIN_USER" "$POSTGRES_USER" sisdmk_admin postgres; do
     [ -n "$candidate" ] || continue
     if postgres_can_connect "$candidate" postgres || postgres_can_connect "$candidate" "$POSTGRES_DATABASE"; then
       printf '%s\n' "$candidate"

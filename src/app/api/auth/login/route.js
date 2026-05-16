@@ -37,7 +37,7 @@ export async function POST(request) {
   try {
     user = await findLoginUser(username);
   } catch (error) {
-    console.error("Login MySQL error:", error.message);
+    console.error("Login PostgreSQL error:", error.message);
     return fail("Layanan login sedang tidak tersedia. Hubungi administrator.", 503);
   }
   if (!user) {

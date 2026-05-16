@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { filterPegawaiByRole, getPegawaiWilayah } from "@/lib/auth/access";
 import { requireAuth } from "@/lib/auth/requireAuth";
 import { fail, ok } from "@/lib/helpers/response";
@@ -28,13 +27,8 @@ import {
 } from "@/lib/data/pegawaiStore";
 import { validatePegawaiReferenceFields } from "@/lib/pegawaiFormOptions";
 import { normalizePegawaiReferencePayload } from "@/lib/pegawaiReferenceOptions";
-
-const schema = z.object({
-  nama: z.string().min(3),
-  nama_ukpd: z.string().min(3),
-  jenis_pegawai: z.string().min(2),
-  email: z.string().email().optional().or(z.literal(""))
-}).passthrough();
+import { writeAuditLog } from "@/lib/security/auditLog";
+import { parsePositiveId, pegawaiPayloadSchema, sanitizePegawaiPayload } from "@/lib/validation/pegawai";
 
 async function findAllowedById(id, user, ukpdList) {
   const item = await getPegawaiById(id);
@@ -104,7 +98,9 @@ export async function GET(_request, { params }) {
     const { user, error } = await requireAuth();
     if (error) return error;
     await ensureSchemaWithFreshConnection();
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const id = parsePositiveId(rawId);
+    if (!id) return fail("ID pegawai tidak valid.", 400);
     const ukpdList = await getUkpdData();
     const item = await findAllowedById(id, user, ukpdList);
     if (!item) return fail("Data pegawai tidak ditemukan atau tidak dapat diakses.", 404);
@@ -170,11 +166,13 @@ export async function PUT(request, { params }) {
   try {
     const { user, error } = await requireAuth([], request);
     if (error) return error;
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const id = parsePositiveId(rawId);
+    if (!id) return fail("ID pegawai tidak valid.", 400);
     const ukpdList = await getUkpdData();
     const current = await findAllowedById(id, user, ukpdList);
     if (!current) return fail("Data pegawai tidak ditemukan atau tidak dapat diakses.", 404);
-    const parsed = schema.safeParse(await request.json());
+    const parsed = pegawaiPayloadSchema.safeParse(sanitizePegawaiPayload(await request.json()));
     if (!parsed.success) return fail("Validasi data pegawai gagal.", 422, parsed.error.flatten());
     const data = normalizePegawaiReferencePayload(parsed.data);
     const referenceValidation = await validatePegawaiReferenceFields(data);
@@ -186,6 +184,14 @@ export async function PUT(request, { params }) {
     const allowed = filterPegawaiByRole([updated], user, ukpdList).length === 1;
     if (!allowed) return fail("Anda tidak boleh memindahkan pegawai ke UKPD atau wilayah lain.", 403);
     const saved = await updatePegawaiData(id, data);
+    await writeAuditLog({
+      request,
+      user,
+      action: "pegawai.update",
+      entityType: "pegawai",
+      entityId: id,
+      metadata: { nama_ukpd: saved?.nama_ukpd }
+    });
     return ok(saved, "Pegawai berhasil diperbarui");
   } catch (routeError) {
     console.error("Update pegawai API error:", routeError);
@@ -197,11 +203,22 @@ export async function DELETE(request, { params }) {
   try {
     const { user, error } = await requireAuth([], request);
     if (error) return error;
-    const { id } = await params;
+    const { id: rawId } = await params;
+    const id = parsePositiveId(rawId);
+    if (!id) return fail("ID pegawai tidak valid.", 400);
     const ukpdList = await getUkpdData();
     const current = await findAllowedById(id, user, ukpdList);
     if (!current) return fail("Data pegawai tidak ditemukan atau tidak dapat diakses.", 404);
-    return ok(await deletePegawaiData(id), "Pegawai berhasil dihapus");
+    const deleted = await deletePegawaiData(id);
+    await writeAuditLog({
+      request,
+      user,
+      action: "pegawai.delete",
+      entityType: "pegawai",
+      entityId: id,
+      metadata: { nama_ukpd: current?.nama_ukpd }
+    });
+    return ok(deleted, "Pegawai berhasil dihapus");
   } catch (routeError) {
     console.error("Hapus pegawai API error:", routeError);
     return fail("Terjadi kesalahan saat menghapus pegawai.", 500);

@@ -3,10 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, MessageCircle, Send, X } from "lucide-react";
 
+function createConversationId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function PublicAiChat() {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const conversationIdRef = useRef(createConversationId());
   const panelRef = useRef(null);
   const scrollRef = useRef(null);
   const [items, setItems] = useState([
@@ -26,6 +32,23 @@ export default function PublicAiChat() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [open]);
 
+  async function readApiPayload(response) {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      return response.json();
+    }
+
+    const body = await response.text().catch(() => "");
+    const looksLikeHtml = body.trim().startsWith("<!DOCTYPE") || body.trim().startsWith("<html");
+    if (looksLikeHtml) {
+      throw new Error(
+        `Endpoint /api/ai/public-chat mengembalikan HTML (status ${response.status}). Pastikan container memakai branch feature/ai-agent-roadmap dan reverse proxy mengarah ke port aplikasi 8091.`
+      );
+    }
+
+    throw new Error(`Endpoint /api/ai/public-chat tidak mengembalikan JSON valid (status ${response.status}).`);
+  }
+
   async function sendText(text) {
     const trimmed = String(text || "").trim();
     if (!trimmed || loading) return;
@@ -36,9 +59,9 @@ export default function PublicAiChat() {
       const response = await fetch("/api/ai/public-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed })
+        body: JSON.stringify({ message: trimmed, conversation_id: conversationIdRef.current })
       });
-      const payload = await response.json();
+      const payload = await readApiPayload(response);
       if (!response.ok || !payload.success) throw new Error(payload.message || "Workflow n8n public gagal diproses.");
       const data = payload.data || {};
       setItems((current) => [...current, {

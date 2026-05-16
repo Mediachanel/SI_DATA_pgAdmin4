@@ -6,6 +6,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
 import MobileSidebar from "@/components/layout/MobileSidebar";
 import MobileBottomNav from "@/components/layout/MobileBottomNav";
+import InternalAiChat from "@/components/ai/InternalAiChat";
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const ACTIVITY_EVENTS = ["mousedown", "mousemove", "keydown", "scroll", "touchstart", "click"];
@@ -97,6 +98,7 @@ export default function AppShell({ children }) {
         <Topbar user={user} onOpenMenu={() => setMobileOpen(true)} collapsed={collapsed} onToggleSidebar={() => setCollapsed((value) => !value)} />
         <main className="w-full px-3 pb-28 pt-3 print:p-0 sm:px-5 sm:pt-5 md:pb-8 lg:px-6">{children}</main>
       </div>
+      <InternalAiChat variant="floating" />
       <MobileBottomNav user={user} />
     </div>
   );

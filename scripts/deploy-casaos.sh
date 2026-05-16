@@ -6,19 +6,32 @@ APP_PORT="${APP_PORT:-3000}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.casaos.yml}"
 ENV_FILE="${ENV_FILE:-.env.casaos}"
 NETWORK_NAME="${NETWORK_NAME:-sisdmk2-network}"
-POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-pasir-postgres}"
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-sisdmk-postgres}"
 POSTGRES_HOST="${POSTGRES_HOST:-$POSTGRES_CONTAINER}"
 POSTGRES_HOSTS="${POSTGRES_HOSTS:-$POSTGRES_CONTAINER,host.docker.internal,172.17.0.1,postgres,db,127.0.0.1}"
 POSTGRES_DATABASE="${POSTGRES_DATABASE:-si_data}"
 POSTGRES_DATABASES="${POSTGRES_DATABASES:-si_data}"
-POSTGRES_USER="${POSTGRES_USER:-postgres}"
+POSTGRES_USER="${POSTGRES_USER:-sisdmk_admin}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_CONNECT_TIMEOUT_MS="${POSTGRES_CONNECT_TIMEOUT_MS:-1500}"
+POSTGRES_IDLE_TIMEOUT_MS="${POSTGRES_IDLE_TIMEOUT_MS:-30000}"
+POSTGRES_POOL_MAX="${POSTGRES_POOL_MAX:-10}"
+POSTGRES_POOL_VERIFY_INTERVAL_MS="${POSTGRES_POOL_VERIFY_INTERVAL_MS:-15000}"
+POSTGRES_APPLICATION_NAME="${POSTGRES_APPLICATION_NAME:-sisdmk2-app}"
+DASHBOARD_CACHE_TTL_MS="${DASHBOARD_CACHE_TTL_MS:-30000}"
+DASHBOARD_DATA_CACHE_TTL_MS="${DASHBOARD_DATA_CACHE_TTL_MS:-30000}"
 APP_ORIGIN="${APP_ORIGIN:-}"
 JWT_SECRET="${JWT_SECRET:-}"
-ALLOW_INSECURE_LOCAL_HTTP="${ALLOW_INSECURE_LOCAL_HTTP:-true}"
-COOKIE_SECURE="${COOKIE_SECURE:-false}"
+ALLOW_INSECURE_LOCAL_HTTP="${ALLOW_INSECURE_LOCAL_HTTP:-}"
+COOKIE_SECURE="${COOKIE_SECURE:-}"
+TRUST_PROXY_HEADERS="${TRUST_PROXY_HEADERS:-true}"
+AI_ENABLE_N8N="${AI_ENABLE_N8N:-true}"
+N8N_WEBHOOK_URL="${N8N_WEBHOOK_URL:-}"
+N8N_PUBLIC_WEBHOOK_URL="${N8N_PUBLIC_WEBHOOK_URL:-}"
+N8N_API_SECRET="${N8N_API_SECRET:-}"
+N8N_WEBHOOK_TIMEOUT_MS="${N8N_WEBHOOK_TIMEOUT_MS:-20000}"
+N8N_WEBHOOK_RETRIES="${N8N_WEBHOOK_RETRIES:-1}"
 FORCE_ENV="${FORCE_ENV:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 SKIP_DB_CHECK="${SKIP_DB_CHECK:-0}"
@@ -43,10 +56,15 @@ Options:
   --app-port PORT             Port host aplikasi, default 3000
   --app-origin URL            URL aplikasi, contoh http://192.168.1.10:3000
   --jwt-secret VALUE          JWT secret production
-  --postgres-container NAME   Nama container PostgreSQL existing, default pasir-postgres
+  --trust-proxy-headers true|false Percaya header Cloudflare/proxy, default true
+  --ai-enable-n8n true|false  Aktifkan bridge AI n8n, default true
+  --n8n-webhook-url URL       Webhook n8n untuk chat internal
+  --n8n-public-webhook-url URL Webhook n8n untuk chat publik
+  --n8n-api-secret VALUE      Secret header x-ai-secret untuk n8n dan tool internal
+  --postgres-container NAME   Nama container PostgreSQL existing, default sisdmk-postgres
   --postgres-host HOST        Host PostgreSQL untuk app
   --postgres-database NAME    Nama database, default si_data
-  --postgres-user NAME        User PostgreSQL, default postgres
+  --postgres-user NAME        User PostgreSQL, default sisdmk_admin
   --postgres-password VALUE   Password PostgreSQL
   --force-env                 Tulis ulang .env.casaos
   --skip-build                Lewati docker compose build
@@ -77,6 +95,31 @@ while [ $# -gt 0 ]; do
     --jwt-secret)
       need_value "$@"
       JWT_SECRET="$2"
+      shift 2
+      ;;
+    --trust-proxy-headers)
+      need_value "$@"
+      TRUST_PROXY_HEADERS="$2"
+      shift 2
+      ;;
+    --ai-enable-n8n)
+      need_value "$@"
+      AI_ENABLE_N8N="$2"
+      shift 2
+      ;;
+    --n8n-webhook-url)
+      need_value "$@"
+      N8N_WEBHOOK_URL="$2"
+      shift 2
+      ;;
+    --n8n-public-webhook-url)
+      need_value "$@"
+      N8N_PUBLIC_WEBHOOK_URL="$2"
+      shift 2
+      ;;
+    --n8n-api-secret)
+      need_value "$@"
+      N8N_API_SECRET="$2"
       shift 2
       ;;
     --postgres-container)
@@ -184,16 +227,44 @@ write_env_file() {
     die "POSTGRES_PASSWORD wajib diisi. Pakai --postgres-password atau set env POSTGRES_PASSWORD."
   fi
 
+  if [ -z "${COOKIE_SECURE:-}" ]; then
+    case "$APP_ORIGIN" in
+      https://*) COOKIE_SECURE="true" ;;
+      *) COOKIE_SECURE="false" ;;
+    esac
+  fi
+
+  if [ -z "${ALLOW_INSECURE_LOCAL_HTTP:-}" ]; then
+    case "$APP_ORIGIN" in
+      https://*) ALLOW_INSECURE_LOCAL_HTTP="false" ;;
+      *) ALLOW_INSECURE_LOCAL_HTTP="true" ;;
+    esac
+  fi
+
   umask 077
   cat >"$ENV_FILE" <<EOF
 APP_PORT=$APP_PORT
 POSTGRES_PORT=$POSTGRES_PORT
 POSTGRES_CONNECT_TIMEOUT_MS=$POSTGRES_CONNECT_TIMEOUT_MS
+POSTGRES_IDLE_TIMEOUT_MS=$POSTGRES_IDLE_TIMEOUT_MS
+POSTGRES_POOL_MAX=$POSTGRES_POOL_MAX
+POSTGRES_POOL_VERIFY_INTERVAL_MS=$POSTGRES_POOL_VERIFY_INTERVAL_MS
+POSTGRES_APPLICATION_NAME=$POSTGRES_APPLICATION_NAME
+DASHBOARD_CACHE_TTL_MS=$DASHBOARD_CACHE_TTL_MS
+DASHBOARD_DATA_CACHE_TTL_MS=$DASHBOARD_DATA_CACHE_TTL_MS
 
 JWT_SECRET=$JWT_SECRET
+APP_URL=$APP_ORIGIN
 APP_ORIGIN=$APP_ORIGIN
 ALLOW_INSECURE_LOCAL_HTTP=$ALLOW_INSECURE_LOCAL_HTTP
 COOKIE_SECURE=$COOKIE_SECURE
+TRUST_PROXY_HEADERS=$TRUST_PROXY_HEADERS
+AI_ENABLE_N8N=$AI_ENABLE_N8N
+N8N_WEBHOOK_URL=$N8N_WEBHOOK_URL
+N8N_PUBLIC_WEBHOOK_URL=$N8N_PUBLIC_WEBHOOK_URL
+N8N_API_SECRET=$N8N_API_SECRET
+N8N_WEBHOOK_TIMEOUT_MS=$N8N_WEBHOOK_TIMEOUT_MS
+N8N_WEBHOOK_RETRIES=$N8N_WEBHOOK_RETRIES
 
 POSTGRES_HOST=$POSTGRES_HOST
 POSTGRES_HOSTS=$POSTGRES_HOSTS

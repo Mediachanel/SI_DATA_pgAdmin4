@@ -21,6 +21,7 @@ function getRequestOrigins(request) {
   const url = new URL(request.url);
   const origins = new Set([
     `${url.protocol}//${url.host}`,
+    ...splitList(process.env.APP_URL),
     ...splitList(process.env.APP_ORIGIN),
     ...splitList(process.env.ALLOWED_ORIGINS)
   ].filter(Boolean));

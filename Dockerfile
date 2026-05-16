@@ -31,7 +31,8 @@ COPY --from=python-deps /opt/venv /opt/venv
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 \
   && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p storage && chown -R node:node storage
+RUN mkdir -p storage .next/cache/images \
+  && chown -R node:node storage .next/cache
 USER node
 
 EXPOSE 3000

@@ -1,80 +1,199 @@
-# Audit Keamanan
+# SI-SDMK Security Audit
 
-Tanggal audit: 2026-04-26
+Tanggal audit: 2026-05-16
 
-## Ruang Lingkup
+## Scope
 
-Audit ini mencakup aplikasi Next.js App Router, API routes, autentikasi JWT cookie, RBAC, koneksi MySQL, upload PDF, Docker/Compose, file env, dan dependency npm.
+Audit mencakup:
 
-## Celah Prioritas Tinggi yang Ditutup
+- Next.js App Router.
+- JWT HttpOnly cookie session.
+- PostgreSQL access layer.
+- Docker/CasaOS deployment.
+- Cloudflare Tunnel.
+- n8n AI Agent integration.
+- Upload, AI tools, audit logs, and environment handling.
 
-1. Secret JWT default mudah ditebak.
-   - Sebelumnya aplikasi bisa memakai fallback seperti `dev-secret-change-me` atau secret compose yang bisa ditebak.
-   - Production sekarang wajib memakai `JWT_SECRET` kuat minimal 32 karakter dan menolak nilai contoh/default.
+## Session And JWT
 
-2. Cookie sesi kurang ketat.
-   - Cookie sesi sekarang `HttpOnly`, `SameSite=Strict`, `Secure` di production, dan memakai helper terpusat.
+Current controls:
 
-3. Endpoint mutasi data belum punya proteksi CSRF/origin.
-   - POST/PUT/DELETE login, logout, pegawai, usulan, upload dokumen, import DRH, dan QnA admin sekarang divalidasi same-origin.
-   - `APP_ORIGIN` atau `ALLOWED_ORIGINS` bisa dipakai saat aplikasi berada di balik reverse proxy/domain publik.
+- Session cookie `sdm_session` is HttpOnly.
+- Cookie uses SameSite Strict.
+- Production requires strong `JWT_SECRET`.
+- `COOKIE_SECURE=true` required on HTTPS domain.
+- Same-origin guard is used on sensitive POST routes and AI gateway.
+- Cloudflare compatibility requires `TRUST_PROXY_HEADERS=true`.
 
-4. Brute force login.
-   - Login sekarang punya rate limit per IP dan username.
-   - Error koneksi DB tidak lagi membocorkan detail host/user/password/database ke response publik.
+Risks:
 
-5. Password default/seed.
-   - Production menolak password umum seperti `admin123`, `password123`, `123456`, dan `12345678`.
-   - Script generator seed UKPD sekarang wajib diberi `UKPD_DEFAULT_PASSWORD` kuat, lalu menghasilkan hash bcrypt baru.
+- Login rate limit is in-memory. Multi-replica deployment needs Redis or database-backed limiter.
+- Session revocation list is not implemented.
 
-6. Upload PDF DRH.
-   - Import DRH sekarang membatasi ukuran file, memeriksa magic header `%PDF-`, dan membersihkan file sementara.
+Priority:
 
-7. Upload dan akses dokumen usulan.
-   - File PDF checklist punya batas ukuran dan magic-header check.
-   - Response PDF sekarang memakai `Cache-Control: private, no-store` dan `X-Content-Type-Options: nosniff`.
-   - Admin UKPD tidak lagi bisa menandai checklist verifikasi hanya dengan upload dokumen.
+- Add Redis-backed rate limiting.
+- Add token version/session revocation for forced logout after password reset.
 
-8. Eskalasi status usulan.
-   - Admin UKPD tidak bisa mengubah `status`, `verif_checklist`, atau `tanggal_usulan` melalui request forged.
-   - Status usulan dibatasi ke daftar nilai valid.
+## SQL Injection
 
-9. Secret masuk Docker image.
-   - `.dockerignore` sekarang mengecualikan `.env*`, log, storage, dan tmp.
-   - Docker runtime berjalan sebagai user `node`, bukan root.
+Current controls:
 
-10. Default credential compose.
-    - `docker-compose.yml` dan `docker-compose.casaos.yml` tidak lagi memberi default password/JWT production.
-    - MySQL compose dibind ke `127.0.0.1` agar tidak terbuka ke jaringan luar secara default.
+- Application uses parameterized queries through PostgreSQL compatibility layer.
+- n8n must call approved tool endpoints, not execute arbitrary AI-generated SQL.
+- AI tools apply role scope server-side.
 
-11. Header keamanan.
-    - Ditambahkan `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS, dan CSP dasar.
+Risks:
 
-12. Dependency rentan.
-    - `npm audit` awal menemukan advisori PostCSS.
-    - Next.js disegarkan ke 15.5.15 dan PostCSS dioverride ke 8.5.10.
-    - `npm audit` final: 0 vulnerability.
+- Compatibility SQL rewrite is complex and should stay covered by tests.
+- Future n8n workflows must not introduce raw SQL execution from LLM output.
 
-## Sisa Risiko Operasional
+Priority:
 
-1. Rotasi credential wajib dilakukan di server sebenarnya.
-   - Ganti semua password akun UKPD/Admin yang pernah memakai seed lama.
-   - Ganti `POSTGRES_PASSWORD` dan `JWT_SECRET` bila pernah tersimpan di file lokal, chat, atau repository.
+- Add tests for every internal AI tool.
+- Keep a strict tool allowlist in n8n.
 
-2. File SQL lama yang berisi hash seed masih ada untuk kebutuhan historis/dev.
-   - Jangan import file seed lama ke production.
-   - Gunakan `UKPD_DEFAULT_PASSWORD="password-kuat-minimal-12" node scripts/generate-ukpd-password-sql.mjs`.
+## SSRF
 
-3. Rate limit login masih in-memory.
-   - Untuk multi-container atau serverless, pindahkan rate limit ke Redis/database agar konsisten di semua instance.
+Current controls:
 
-4. Belum ada audit log permanen.
-   - Aksi login gagal, upload dokumen, import DRH, perubahan pegawai, dan perubahan status usulan sebaiknya dicatat ke tabel audit.
+- Next.js only calls configured `N8N_WEBHOOK_URL` and `N8N_PUBLIC_WEBHOOK_URL`.
+- Internal tools require `x-ai-secret`.
 
-5. Password SHA-256 legacy masih diterima.
-   - Setelah semua akun bisa login, migrasikan semua password ke bcrypt dan hapus dukungan SHA-256 legacy.
+Risks:
 
-## Verifikasi
+- If env webhook URL is compromised, app can call an attacker-controlled endpoint.
 
-- `npm.cmd run build`: berhasil.
-- `npm.cmd audit --json`: 0 vulnerability.
+Priority:
+
+- Restrict webhook URLs to expected hostnames in production.
+- Alert on webhook host mismatch.
+
+## RCE
+
+Current controls:
+
+- Docker app runs as `node`.
+- `no-new-privileges` and `cap_drop: ALL` are enabled.
+- n8n AI is not allowed to execute shell commands through the app.
+
+Risks:
+
+- Document parsing and future AI automation must avoid executing user content.
+- n8n credentials must be locked down.
+
+Priority:
+
+- Keep file extraction sandboxed.
+- Disable unsafe n8n nodes for production workflows where possible.
+
+## XSS
+
+Current controls:
+
+- React escapes text by default.
+- CSP is configured in `next.config.mjs`.
+- User-generated AI responses are rendered as text, not HTML.
+
+Risks:
+
+- `script-src` still allows `'unsafe-inline'` due to Next/runtime requirements.
+
+Priority:
+
+- Avoid `dangerouslySetInnerHTML`.
+- Continue sanitizing imports and AI document text.
+
+## CSRF
+
+Current controls:
+
+- Same-origin validation checks `Origin` or `Referer`.
+- `APP_URL`, `APP_ORIGIN`, and `ALLOWED_ORIGINS` are supported.
+- SameSite Strict cookie reduces cross-site request risk.
+
+Risks:
+
+- Missing origin headers are rejected only in production.
+
+Priority:
+
+- Add regression tests for Cloudflare forwarded origin handling.
+
+## Docker Privilege
+
+Current controls:
+
+- App container uses non-root user.
+- `cap_drop: ALL`.
+- `no-new-privileges:true`.
+- Next cache uses tmpfs instead of broad writable image path.
+
+Risks:
+
+- `read_only: true` was removed for runtime stability. File writes should be limited by mounted volumes and tmpfs.
+
+Priority:
+
+- Keep only `/app/storage`, `/tmp`, and `/app/.next/cache` writable.
+- Consider reintroducing read-only root only after validating Next.js runtime writes.
+
+## Cloudflare Security
+
+Current controls:
+
+- HTTPS public domain.
+- Secure cookies.
+- Proxy headers trusted only when configured.
+
+Risks:
+
+- Tunnel exposes whatever service is configured. Misrouting can expose Adminer/n8n.
+
+Priority:
+
+- Protect n8n with authentication.
+- Do not expose Adminer publicly.
+- Use Cloudflare Access for admin-only tools.
+
+## Environment Leaks
+
+Current controls:
+
+- Docs use placeholders for secrets.
+- Health endpoint does not expose DB host, user, password, or raw connection errors.
+
+Risks:
+
+- Secrets have appeared in local chat/screenshots and must be rotated before production finalization.
+
+Priority:
+
+- Rotate `POSTGRES_PASSWORD`, `JWT_SECRET`, `N8N_API_SECRET`, and provider API keys.
+- Keep `.env.casaos` outside commits.
+
+## AI Security
+
+Current controls:
+
+- AI must go through n8n.
+- Internal tools require shared secret.
+- Tool outputs mask sensitive identifiers where designed.
+- AI write path creates draft approval tasks.
+
+Risks:
+
+- Prompt injection can still influence n8n if workflow does not enforce tool gates.
+- Approval executor is not complete.
+
+Priority:
+
+- Add n8n verification gate.
+- Add prompt injection test cases.
+- Implement approval executor with audit log.
+
+## Overall Risk Rating
+
+Current state: medium.
+
+The system is suitable for controlled pilot after validating production env, database restore, login, and n8n workflow. It is not yet ready for unattended AI write automation until approval execution, workflow export, and AI safety tests are complete.

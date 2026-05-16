@@ -1,11 +1,16 @@
+import { validateSameOrigin } from "@/lib/auth/requestGuards";
 import { fail, ok } from "@/lib/helpers/response";
 import { extractWorkflowLogPayload, writeAiWorkflowLog } from "@/lib/n8n-ai/audit";
 import { isN8nAiEnabled } from "@/lib/n8n-ai/security";
 import { normalizeWorkflowResponse } from "@/lib/n8n-ai/response";
+import { callN8nWebhook, N8nWebhookError } from "@/lib/n8n-ai/webhookClient";
 
 export const runtime = "nodejs";
 
 export async function POST(request) {
+  const originError = validateSameOrigin(request);
+  if (originError) return originError;
+
   try {
     const body = await request.json();
     const message = String(body.message || "").trim();
@@ -25,43 +30,23 @@ export async function POST(request) {
       return fail("Konfigurasi n8n public belum tersedia", 500);
     }
 
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-ai-secret": secret
-      },
-      body: JSON.stringify({
+    const { result, requestId, attempt } = await callN8nWebhook({
+      webhookUrl,
+      secret,
+      source: "public_chat",
+      payload: {
         message,
-        source: "public_chat"
-      })
+        source: "public_chat",
+        conversation_id: body.conversation_id || body.session_id || null,
+        client: {
+          user_agent: request.headers.get("user-agent") || null
+        }
+      }
     });
 
-    const rawResult = await response.text();
-    let result = null;
-    if (rawResult.trim()) {
-      try {
-        result = JSON.parse(rawResult);
-      } catch {
-        return fail("Workflow n8n public harus mengembalikan JSON valid.", 502);
-      }
-    }
-
-    if (!response.ok) {
-      await writeAiWorkflowLog({
-        source: "public_chat",
-        message,
-        verification: "n8n_error",
-        response: result?.error || result?.message || "Workflow n8n public gagal diproses"
-      });
-      return fail("Workflow n8n public gagal diproses", 500, result);
-    }
-
-    if (!result) {
-      return fail("Workflow n8n public belum mengembalikan response JSON.", 502);
-    }
-
     const normalized = normalizeWorkflowResponse(result, message);
+    normalized.request_id = requestId;
+    normalized.webhook_attempt = attempt;
     await writeAiWorkflowLog(extractWorkflowLogPayload({
       result: normalized,
       message,
@@ -70,6 +55,16 @@ export async function POST(request) {
 
     return ok(normalized, "Public AI n8n selesai memproses pesan.");
   } catch (error) {
+    if (error instanceof N8nWebhookError) {
+      await writeAiWorkflowLog({
+        source: "public_chat",
+        message: "n8n webhook failed",
+        verification: "n8n_error",
+        response: error.message
+      });
+      return fail(error.message, error.status || 502, error.result);
+    }
+
     console.error("AI n8n public chat error:", error);
     return fail("Public chat gagal diproses", 500);
   }

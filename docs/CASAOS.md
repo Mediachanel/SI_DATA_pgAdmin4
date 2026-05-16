@@ -1,19 +1,19 @@
 # CasaOS Deployment
 
-Alur ini mengikuti pola PasarKita: deploy dijalankan dari terminal CasaOS/DietPi, source ditarik dari GitHub, lalu container dibuild di server.
+Deploy dijalankan dari terminal CasaOS/DietPi, source ditarik dari GitHub, lalu container dibuild di server.
 
 Deployment ini hanya untuk SI Kepegawaian:
 
 - App container: `sisdmk2-app`
 - App folder: `/DATA/AppData/si-kepegawaian`
 - Database utama: `si_data`
-- PostgreSQL existing: `pasarkita-postgres`
-- PostgreSQL admin/user existing: `pasarkita`
+- PostgreSQL existing: `sisdmk-postgres`
+- PostgreSQL admin/user existing: `sisdmk_admin`
 - Docker network: `sisdmk2-network`
 - Domain produksi: `https://dinkes.kepegawaian.media`
 - Port host app: `8091`
 
-PasarKita tidak perlu dideploy ulang dan tidak disentuh oleh script ini.
+Aplikasi memakai PostgreSQL SI SDMK sendiri. Jangan memakai konfigurasi MariaDB/MySQL lama untuk app Next.js ini.
 
 ## Deploy dari CasaOS via GitHub
 
@@ -28,10 +28,10 @@ sh deploy-casaos-github.sh \
   --force-env \
   --app-port 8091 \
   --app-origin https://dinkes.kepegawaian.media \
-  --postgres-container pasarkita-postgres \
-  --postgres-admin-user pasarkita \
-  --postgres-user pasarkita \
-  --postgres-password 'PASSWORD_POSTGRES_PASARKITA' \
+  --postgres-container sisdmk-postgres \
+  --postgres-admin-user sisdmk_admin \
+  --postgres-user sisdmk_admin \
+  --postgres-password 'PASSWORD_POSTGRES_SISDMK' \
   --postgres-database si_data
 ```
 
@@ -54,23 +54,33 @@ docker exec sisdmk2-app npm run check:postgres
 Server CasaOS/DietPi yang dipakai saat ini memiliki container database:
 
 ```text
-pasarkita-postgres
+sisdmk-postgres
 ```
 
 Env PostgreSQL container tersebut:
 
 ```text
-POSTGRES_DB=pasarkita
-POSTGRES_USER=pasarkita
-POSTGRES_PASSWORD=PASSWORD_POSTGRES_PASARKITA
+POSTGRES_DB=si_data
+POSTGRES_USER=sisdmk_admin
+POSTGRES_PASSWORD=lihat nilai POSTGRES_PASSWORD di env server
 ```
 
-Aplikasi SI Kepegawaian tetap memakai database PostgreSQL sendiri bernama `si_data` di container PostgreSQL yang sama. Script deploy akan membuat/cek database `si_data` dengan user `pasarkita`. Database `pasarkita` milik aplikasi PasarKita tidak dihapus.
+Aplikasi SI Kepegawaian memakai database PostgreSQL bernama `si_data` dengan user `sisdmk_admin`.
+
+Isian Adminer yang benar:
+
+```text
+Sistem     : PostgreSQL
+Server     : sisdmk-postgres
+Pengguna   : sisdmk_admin
+Sandi      : nilai POSTGRES_PASSWORD dari env server
+Basis data : si_data
+```
 
 Untuk melihat env PostgreSQL di server:
 
 ```bash
-docker inspect pasarkita-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'POSTGRES|PG'
+docker inspect sisdmk-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'POSTGRES|PG'
 ```
 
 Catatan penting: container lama `sikepeg-api` memakai MariaDB/MySQL, bukan PostgreSQL:
@@ -96,10 +106,10 @@ sh deploy-casaos-github.sh \
   --force-env \
   --app-port 8091 \
   --app-origin https://dinkes.kepegawaian.media \
-  --postgres-container pasarkita-postgres \
-  --postgres-admin-user pasarkita \
-  --postgres-user pasarkita \
-  --postgres-password 'PASSWORD_POSTGRES_PASARKITA' \
+  --postgres-container sisdmk-postgres \
+  --postgres-admin-user sisdmk_admin \
+  --postgres-user sisdmk_admin \
+  --postgres-password 'PASSWORD_POSTGRES_SISDMK' \
   --postgres-database si_data \
   --restore-dump /DATA/Downloads/si_data.pg16.sql.tgz
 ```
@@ -110,7 +120,7 @@ Jika dump sudah diekstrak menjadi `.sql`, path `.sql` juga bisa dipakai:
 sh deploy-casaos-github.sh --restore-dump /DATA/Downloads/si_data.pg16.sql
 ```
 
-Jangan restore `pasar_kita` untuk alur ini, karena database PasarKita sudah ada dan aplikasi PasarKita terpisah.
+Jangan restore database lain ke `si_data`. Pakai hanya dump PostgreSQL yang memang berasal dari database SI SDMK.
 
 ## Validasi
 
@@ -118,7 +128,7 @@ Jangan restore `pasar_kita` untuk alur ini, karena database PasarKita sudah ada 
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 docker logs --tail 80 sisdmk2-app
 docker exec sisdmk2-app npm run check:postgres
-docker exec -it pasarkita-postgres psql -U pasarkita -d si_data -c "\dt"
+docker exec -it sisdmk-postgres psql -U sisdmk_admin -d si_data -c "\dt"
 ```
 
 ## Deploy Ulang Tanpa Restore
@@ -131,10 +141,10 @@ sh deploy-casaos-github.sh \
   --force-env \
   --app-port 8091 \
   --app-origin https://dinkes.kepegawaian.media \
-  --postgres-container pasarkita-postgres \
-  --postgres-admin-user pasarkita \
-  --postgres-user pasarkita \
-  --postgres-password 'PASSWORD_POSTGRES_PASARKITA' \
+  --postgres-container sisdmk-postgres \
+  --postgres-admin-user sisdmk_admin \
+  --postgres-user sisdmk_admin \
+  --postgres-password 'PASSWORD_POSTGRES_SISDMK' \
   --postgres-database si_data
 ```
 
@@ -154,7 +164,7 @@ Jika container PostgreSQL CasaOS tidak punya role `postgres`, jalankan dengan us
 
 ```bash
 sh deploy-casaos-github.sh \
-  --postgres-container pasarkita-postgres \
+  --postgres-container sisdmk-postgres \
   --postgres-admin-user NAMA_USER_ADMIN \
   --postgres-user NAMA_USER_APP \
   --postgres-password 'PASSWORD_USER_APP' \
@@ -193,10 +203,10 @@ sh deploy-casaos-github.sh \
   --force-env \
   --app-port 8091 \
   --app-origin https://dinkes.kepegawaian.media \
-  --postgres-container pasarkita-postgres \
-  --postgres-admin-user pasarkita \
-  --postgres-user pasarkita \
-  --postgres-password 'PASSWORD_POSTGRES_PASARKITA' \
+  --postgres-container sisdmk-postgres \
+  --postgres-admin-user sisdmk_admin \
+  --postgres-user sisdmk_admin \
+  --postgres-password 'PASSWORD_POSTGRES_SISDMK' \
   --postgres-database si_data
 ```
 
@@ -206,9 +216,11 @@ Jika muncul:
 
 ```text
 getaddrinfo ENOTFOUND pasir-postgres
+# atau
+getaddrinfo ENOTFOUND pasarkita-postgres
 ```
 
-Berarti nama container database salah. Server ini memakai `pasarkita-postgres`.
+Berarti nama container database salah atau masih memakai catatan lama. Server ini memakai `sisdmk-postgres`.
 
 Jika muncul:
 
@@ -216,4 +228,4 @@ Jika muncul:
 password authentication failed for user "postgres"
 ```
 
-Berarti user PostgreSQL salah. Server ini memakai user `pasarkita`, bukan `postgres`.
+Berarti user PostgreSQL salah. Server ini memakai user `sisdmk_admin`, bukan `postgres`.

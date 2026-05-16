@@ -1,26 +1,12 @@
-import fs from "node:fs";
 import pg from "pg";
+import { loadDefaultEnv } from "./env.mjs";
 
 function numberPort(value) {
   const port = Number(value || 5432);
   return Number.isFinite(port) ? port : 5432;
 }
 
-function loadEnvFile(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return;
-  const content = fs.readFileSync(filePath, "utf8");
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (!match) continue;
-    const [, key, rawValue] = match;
-    if (process.env[key] !== undefined) continue;
-    process.env[key] = rawValue.trim().replace(/^['"]|['"]$/g, "");
-  }
-}
-
-loadEnvFile(process.argv[2] || ".env");
+loadDefaultEnv();
 
 const pool = new pg.Pool({
   host: process.env.POSTGRES_HOST || process.env.PGHOST || "localhost",

@@ -1,0 +1,545 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(100)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("roles")
+}
+
+model AppUser {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique @db.VarChar(120)
+  passwordHash String    @map("password_hash")
+  roleCode     String    @map("role_code") @db.VarChar(50)
+  wilayah      String?   @db.VarChar(120)
+  ukpdId       Int?      @map("ukpd_id")
+  namaUkpd     String?   @map("nama_ukpd") @db.VarChar(220)
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @map("updated_at")
+
+  @@index([roleCode])
+  @@index([wilayah])
+  @@index([ukpdId])
+  @@map("app_users")
+}
+
+model AuditLog {
+  id          BigInt   @id @default(autoincrement())
+  actorId     String?  @map("actor_id") @db.VarChar(120)
+  actorRole   String?  @map("actor_role") @db.VarChar(50)
+  action      String   @db.VarChar(120)
+  entityType  String?  @map("entity_type") @db.VarChar(120)
+  entityId    String?  @map("entity_id") @db.VarChar(120)
+  ipAddress   String?  @map("ip_address") @db.VarChar(80)
+  userAgent   String?  @map("user_agent")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model AiDocument {
+  id                       BigInt   @id @default(autoincrement())
+  originalFilename         String   @map("original_filename") @db.VarChar(180)
+  storedFilename           String   @map("stored_filename") @db.VarChar(180)
+  storagePath              String   @map("storage_path")
+  contentType              String   @map("content_type") @db.VarChar(120)
+  sizeBytes                BigInt   @map("size_bytes")
+  sha256                   String   @db.Char(64)
+  status                   String   @default("pending_review") @db.VarChar(40)
+  classificationLabel      String?  @map("classification_label") @db.VarChar(80)
+  classificationConfidence Decimal? @map("classification_confidence") @db.Decimal(5, 4)
+  classification           Json     @default("{}")
+  uploadedById             String?  @map("uploaded_by_id") @db.VarChar(120)
+  uploadedByRole           String?  @map("uploaded_by_role") @db.VarChar(50)
+  uploadedByUsername       String?  @map("uploaded_by_username") @db.VarChar(120)
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @default(now()) @map("updated_at")
+
+  extractionResults AiExtractionResult[]
+  validationQueue   AiValidationQueue[]
+
+  @@index([status])
+  @@index([classificationLabel])
+  @@index([createdAt])
+  @@index([sha256])
+  @@map("ai_documents")
+}
+
+model AiExtractionResult {
+  id         BigInt   @id @default(autoincrement())
+  documentId BigInt   @map("document_id")
+  provider   String   @default("mock") @db.VarChar(80)
+  model      String   @default("phase2-mock-classifier") @db.VarChar(120)
+  status     String   @default("draft") @db.VarChar(40)
+  result     Json     @default("{}")
+  confidence Decimal? @db.Decimal(5, 4)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document         AiDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  validationQueues AiValidationQueue[]
+
+  @@index([documentId])
+  @@index([status])
+  @@map("ai_extraction_results")
+}
+
+model AiValidationQueue {
+  id                 BigInt    @id @default(autoincrement())
+  documentId         BigInt    @map("document_id")
+  extractionResultId BigInt?   @map("extraction_result_id")
+  queueStatus        String    @default("pending") @map("queue_status") @db.VarChar(40)
+  assignedRole       String    @default("SUPER_ADMIN") @map("assigned_role") @db.VarChar(50)
+  reviewerId         String?   @map("reviewer_id") @db.VarChar(120)
+  reviewerRole       String?   @map("reviewer_role") @db.VarChar(50)
+  reviewerNotes      String?   @map("reviewer_notes")
+  correctionPayload  Json?     @map("correction_payload")
+  reviewedAt         DateTime? @map("reviewed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @map("updated_at")
+
+  document         AiDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  extractionResult AiExtractionResult? @relation(fields: [extractionResultId], references: [id], onDelete: SetNull)
+
+  @@index([documentId])
+  @@index([queueStatus])
+  @@index([assignedRole])
+  @@map("ai_validation_queue")
+}
+
+model ChatbotIntent {
+  id              BigInt   @id @default(autoincrement())
+  code            String   @unique @db.VarChar(80)
+  name            String   @db.VarChar(120)
+  description     String?
+  requiresHandoff Boolean  @default(false) @map("requires_handoff")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  sessions ChatSession[]
+  messages ChatMessage[]
+
+  @@map("chatbot_intents")
+}
+
+model ChatSession {
+  id              BigInt   @id @default(autoincrement())
+  channel         String   @default("whatsapp") @db.VarChar(40)
+  externalUserId  String   @map("external_user_id") @db.VarChar(120)
+  displayName     String?  @map("display_name") @db.VarChar(180)
+  status          String   @default("open") @db.VarChar(40)
+  lastIntentCode  String?  @map("last_intent_code") @db.VarChar(80)
+  handoffRequired Boolean  @default(false) @map("handoff_required")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+
+  intent   ChatbotIntent? @relation(fields: [lastIntentCode], references: [code])
+  messages ChatMessage[]
+
+  @@unique([channel, externalUserId])
+  @@index([status])
+  @@index([lastIntentCode])
+  @@index([updatedAt])
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id                BigInt   @id @default(autoincrement())
+  sessionId         BigInt   @map("session_id")
+  direction         String   @db.VarChar(20)
+  messageType       String   @default("text") @map("message_type") @db.VarChar(40)
+  providerMessageId String?  @map("provider_message_id") @db.VarChar(180)
+  body              String?
+  redactedBody      String?  @map("redacted_body")
+  intentCode        String?  @map("intent_code") @db.VarChar(80)
+  confidence        Decimal? @db.Decimal(5, 4)
+  aiResponse        Json?    @map("ai_response")
+  rawPayload        Json?    @map("raw_payload")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  session ChatSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  intent  ChatbotIntent? @relation(fields: [intentCode], references: [code])
+
+  @@index([sessionId])
+  @@index([providerMessageId])
+  @@index([intentCode])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+model AiAgentTask {
+  id                  BigInt    @id @default(autoincrement())
+  requestedById       String?   @map("requested_by_id") @db.VarChar(120)
+  requestedByRole     String?   @map("requested_by_role") @db.VarChar(50)
+  requestedByUsername String?   @map("requested_by_username") @db.VarChar(120)
+  mode                String    @default("assistant") @db.VarChar(30)
+  toolName            String    @map("tool_name") @db.VarChar(80)
+  prompt              String
+  input               Json      @default("{}")
+  output              Json      @default("{}")
+  status              String    @default("completed") @db.VarChar(40)
+  approvalRequired    Boolean   @default(false) @map("approval_required")
+  approvedById        String?   @map("approved_by_id") @db.VarChar(120)
+  approvedByRole      String?   @map("approved_by_role") @db.VarChar(50)
+  reviewedAt          DateTime? @map("reviewed_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @default(now()) @map("updated_at")
+
+  auditLogs            AiAgentAuditLog[]
+  internalChatMessages InternalChatMessage[]
+
+  @@index([status])
+  @@index([toolName])
+  @@index([createdAt])
+  @@map("ai_agent_tasks")
+}
+
+model AiAgentAuditLog {
+  id        BigInt   @id @default(autoincrement())
+  taskId    BigInt?  @map("task_id")
+  actorId   String?  @map("actor_id") @db.VarChar(120)
+  actorRole String?  @map("actor_role") @db.VarChar(50)
+  action    String   @db.VarChar(120)
+  toolName  String?  @map("tool_name") @db.VarChar(80)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task AiAgentTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("ai_agent_audit_logs")
+}
+
+model PublicQnaKnowledgeBase {
+  id        BigInt   @id @default(autoincrement())
+  code      String?  @unique @db.VarChar(80)
+  question  String
+  answer    String
+  keywords  String[] @default([])
+  category  String?  @default("Umum") @db.VarChar(120)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  messages PublicChatMessage[]
+
+  @@map("public_qna_knowledge_base")
+}
+
+model PublicChatSession {
+  id              BigInt   @id @default(autoincrement())
+  visitorId       String   @map("visitor_id") @db.VarChar(120)
+  status          String   @default("open") @db.VarChar(40)
+  ipAddress       String?  @map("ip_address") @db.VarChar(80)
+  userAgent       String?  @map("user_agent")
+  lastIntent      String?  @map("last_intent") @db.VarChar(80)
+  handoffRequired Boolean  @default(false) @map("handoff_required")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @map("updated_at")
+
+  messages PublicChatMessage[]
+
+  @@index([visitorId])
+  @@index([updatedAt])
+  @@map("public_chat_sessions")
+}
+
+model PublicChatMessage {
+  id           BigInt   @id @default(autoincrement())
+  sessionId    BigInt   @map("session_id")
+  direction    String   @db.VarChar(20)
+  body         String?
+  redactedBody String?  @map("redacted_body")
+  matchedQnaId BigInt?  @map("matched_qna_id")
+  intent       String?  @db.VarChar(80)
+  confidence   Decimal? @db.Decimal(5, 4)
+  metadata     Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  session PublicChatSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  qna     PublicQnaKnowledgeBase? @relation(fields: [matchedQnaId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("public_chat_messages")
+}
+
+model InternalChatSession {
+  id         BigInt   @id @default(autoincrement())
+  userId     String?  @map("user_id") @db.VarChar(120)
+  userRole   String?  @map("user_role") @db.VarChar(50)
+  username   String?  @db.VarChar(120)
+  status     String   @default("open") @db.VarChar(40)
+  context    Json     @default("{}")
+  lastIntent String?  @map("last_intent") @db.VarChar(80)
+  lastEntity Json     @default("{}") @map("last_entity")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @map("updated_at")
+
+  messages InternalChatMessage[]
+
+  @@index([userId, userRole])
+  @@index([updatedAt])
+  @@map("internal_chat_sessions")
+}
+
+model AiAuditLog {
+  id               BigInt   @id @default(autoincrement())
+  actorId          String?  @map("actor_id") @db.VarChar(120)
+  actorRole        String?  @map("actor_role") @db.VarChar(50)
+  prompt           String?
+  message          String?
+  intent           String?  @db.VarChar(80)
+  detectedIntent   String?  @map("detected_intent") @db.VarChar(80)
+  toolName         String?  @map("tool_name") @db.VarChar(80)
+  extractedEntity  Json     @default("{}") @map("extracted_entity")
+  selectedTool     Json     @default("[]") @map("selected_tool")
+  toolResultSummary Json    @default("[]") @map("tool_result_summary")
+  confidenceScore  Decimal? @map("confidence_score") @db.Decimal(5, 4)
+  response         String?
+  verificationStatus String? @map("verification_status") @db.VarChar(40)
+  scopeResult      String?  @map("scope_result") @db.VarChar(80)
+  executionMs      Int      @default(0) @map("execution_ms")
+  permissionResult String?  @map("permission_result") @db.VarChar(40)
+  fallback         Boolean  @default(false)
+  responseStatus   String?  @map("response_status") @db.VarChar(40)
+  module           String?  @db.VarChar(80)
+  metadata         Json     @default("{}")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([actorRole])
+  @@index([intent])
+  @@index([detectedIntent])
+  @@index([toolName])
+  @@index([verificationStatus])
+  @@index([scopeResult])
+  @@index([responseStatus])
+  @@index([module])
+  @@index([createdAt])
+  @@map("ai_audit_logs")
+}
+
+model InternalChatMessage {
+  id            BigInt   @id @default(autoincrement())
+  sessionId     BigInt   @map("session_id")
+  direction     String   @db.VarChar(20)
+  body          String?
+  redactedBody  String?  @map("redacted_body")
+  toolName      String?  @map("tool_name") @db.VarChar(80)
+  aiAgentTaskId BigInt?  @map("ai_agent_task_id")
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  session InternalChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  task    AiAgentTask?        @relation(fields: [aiAgentTaskId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("internal_chat_messages")
+}
+
+model KnowledgeCategory {
+  id          BigInt   @id @default(autoincrement())
+  code        String?  @unique @db.VarChar(80)
+  name        String   @db.VarChar(160)
+  description String?
+  visibility  String   @default("internal") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  documents KnowledgeDocument[]
+
+  @@index([visibility])
+  @@map("knowledge_categories")
+}
+
+model KnowledgeSource {
+  id         BigInt   @id @default(autoincrement())
+  code       String?  @unique @db.VarChar(120)
+  name       String   @db.VarChar(180)
+  sourceType String   @default("manual") @map("source_type") @db.VarChar(80)
+  uri        String?
+  visibility String   @default("internal") @db.VarChar(20)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @map("updated_at")
+
+  documents KnowledgeDocument[]
+
+  @@index([visibility])
+  @@map("knowledge_sources")
+}
+
+model KnowledgeDocument {
+  id               BigInt   @id @default(autoincrement())
+  categoryId       BigInt?  @map("category_id")
+  sourceRefId      BigInt?  @map("source_ref_id")
+  title            String   @db.VarChar(240)
+  content          String
+  visibility       String   @default("internal") @db.VarChar(20)
+  category         String?  @db.VarChar(120)
+  sourceType       String   @default("manual") @map("source_type") @db.VarChar(80)
+  sourceExternalId String?  @map("source_id") @db.VarChar(180)
+  checksum         String?  @db.VarChar(80)
+  metadata         Json     @default("{}")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdBy        String?  @map("created_by") @db.VarChar(120)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
+
+  categoryRef KnowledgeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  sourceRef   KnowledgeSource?   @relation(fields: [sourceRefId], references: [id], onDelete: SetNull)
+  chunks      KnowledgeChunk[]
+
+  @@index([visibility])
+  @@index([categoryId])
+  @@index([sourceRefId])
+  @@index([sourceExternalId])
+  @@index([isActive])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id         BigInt   @id @default(autoincrement())
+  documentId BigInt   @map("document_id")
+  chunkIndex Int      @default(0) @map("chunk_index")
+  content    String
+  tokenCount Int      @default(0) @map("token_count")
+  metadata   Json     @default("{}")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @map("updated_at")
+
+  document   KnowledgeDocument    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  embeddings KnowledgeEmbedding[]
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+  @@index([isActive])
+  @@map("knowledge_chunks")
+}
+
+model KnowledgeEmbedding {
+  id         BigInt   @id @default(autoincrement())
+  chunkId    BigInt   @map("chunk_id")
+  provider   String   @default("openai") @db.VarChar(80)
+  model      String   @db.VarChar(120)
+  embedding  Json
+  embeddingVector Unsupported("vector")? @map("embedding_vector")
+  dimensions Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  chunk KnowledgeChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@unique([chunkId, provider, model])
+  @@index([chunkId])
+  @@index([model])
+  @@map("knowledge_embeddings")
+}
+
+model AiDraftChange {
+  id                  BigInt    @id @default(autoincrement())
+  actionType          String    @map("action_type") @db.VarChar(80)
+  entityType          String    @map("entity_type") @db.VarChar(80)
+  targetId            String?   @map("target_id") @db.VarChar(120)
+  status              String    @default("PENDING_APPROVAL") @db.VarChar(40)
+  requestedById       String?   @map("requested_by_id") @db.VarChar(120)
+  requestedByRole     String?   @map("requested_by_role") @db.VarChar(50)
+  requestedByUsername String?   @map("requested_by_username") @db.VarChar(120)
+  approvedById        String?   @map("approved_by_id") @db.VarChar(120)
+  approvedByRole      String?   @map("approved_by_role") @db.VarChar(50)
+  message             String?
+  entities            Json      @default("{}")
+  proposedChanges     Json      @default("{}") @map("proposed_changes")
+  rejectedReason      String?   @map("rejected_reason")
+  approvedAt          DateTime? @map("approved_at")
+  deletedAt           DateTime? @map("deleted_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @default(now()) @map("updated_at")
+
+  @@index([status])
+  @@index([actionType])
+  @@index([entityType, targetId])
+  @@index([requestedById, requestedByRole])
+  @@index([createdAt])
+  @@map("ai_draft_changes")
+}
+
+model AiWorkflow {
+  id          BigInt   @id @default(autoincrement())
+  name        String   @unique @db.VarChar(120)
+  description String?
+  definition  Json     @default("{}")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@index([isActive])
+  @@map("ai_workflows")
+}
+
+model AiWorkflowRun {
+  id             BigInt    @id @default(autoincrement())
+  workflowName   String    @map("workflow_name") @db.VarChar(120)
+  status         String    @default("running") @db.VarChar(40)
+  channel        String    @default("internal") @db.VarChar(40)
+  userId         String?   @map("user_id") @db.VarChar(120)
+  userRole       String?   @map("user_role") @db.VarChar(50)
+  username       String?   @db.VarChar(120)
+  triggerMessage String?   @map("trigger_message")
+  input          Json      @default("{}")
+  output         Json      @default("{}")
+  errorMessage   String?   @map("error_message")
+  executionMs    Int       @default(0) @map("execution_ms")
+  metadata       Json      @default("{}")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  nodeRuns AiWorkflowNodeRun[]
+
+  @@index([workflowName])
+  @@index([status])
+  @@index([channel])
+  @@index([userRole])
+  @@index([startedAt])
+  @@map("ai_workflow_runs")
+}
+
+model AiWorkflowNodeRun {
+  id          BigInt    @id @default(autoincrement())
+  runId       BigInt    @map("run_id")
+  nodeId      String    @map("node_id") @db.VarChar(120)
+  nodeType    String    @map("node_type") @db.VarChar(120)
+  status      String    @default("success") @db.VarChar(40)
+  input       Json      @default("{}")
+  output      Json      @default("{}")
+  error       Json?
+  executionMs Int       @default(0) @map("execution_ms")
+  startedAt   DateTime  @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  metadata    Json      @default("{}")
+
+  run AiWorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([nodeType])
+  @@index([status])
+  @@map("ai_workflow_node_runs")
+}

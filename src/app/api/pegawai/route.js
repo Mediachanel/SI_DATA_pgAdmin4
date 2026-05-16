@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { filterPegawaiByRole } from "@/lib/auth/access";
 import { requireAuth } from "@/lib/auth/requireAuth";
 import { fail, ok } from "@/lib/helpers/response";
@@ -7,17 +6,8 @@ import { getConnectedPool } from "@/lib/db/postgres";
 import { ROLES } from "@/lib/constants/roles";
 import { validatePegawaiReferenceFields } from "@/lib/pegawaiFormOptions";
 import { normalizePegawaiReferencePayload } from "@/lib/pegawaiReferenceOptions";
-
-const schema = z.object({
-  nama: z.string().min(3),
-  nama_ukpd: z.string().min(3),
-  jenis_pegawai: z.string().min(2),
-  nip: z.string().optional(),
-  nik: z.string().optional(),
-  email: z.string().email().optional().or(z.literal("")),
-  jenis_kelamin: z.string().optional(),
-  kondisi: z.string().optional()
-}).passthrough();
+import { writeAuditLog } from "@/lib/security/auditLog";
+import { pegawaiPayloadSchema, sanitizePegawaiPayload } from "@/lib/validation/pegawai";
 
 function numberParam(value, fallback, min, max) {
   const number = Number.parseInt(value || "", 10);
@@ -213,7 +203,7 @@ export async function GET(request) {
 export async function POST(request) {
   const { user, error } = await requireAuth([], request);
   if (error) return error;
-  const parsed = schema.safeParse(await request.json());
+  const parsed = pegawaiPayloadSchema.safeParse(sanitizePegawaiPayload(await request.json()));
   if (!parsed.success) return fail("Validasi data pegawai gagal.", 422, parsed.error.flatten());
   const data = normalizePegawaiReferencePayload(parsed.data);
   const referenceValidation = await validatePegawaiReferenceFields(data);
@@ -226,5 +216,13 @@ export async function POST(request) {
   const allowed = filterPegawaiByRole([nextItem], user, ukpdList).length === 1;
   if (!allowed) return fail("Anda tidak boleh membuat pegawai untuk UKPD atau wilayah lain.", 403);
   const created = await createPegawaiData(nextItem);
+  await writeAuditLog({
+    request,
+    user,
+    action: "pegawai.create",
+    entityType: "pegawai",
+    entityId: created?.id_pegawai,
+    metadata: { nama_ukpd: created?.nama_ukpd }
+  });
   return ok(created, "Pegawai berhasil ditambahkan");
 }

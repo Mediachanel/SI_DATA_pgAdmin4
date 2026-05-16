@@ -98,10 +98,10 @@ load_env_file() {
     esac
   done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE")
 
-  POSTGRES_HOST="${POSTGRES_HOST:-pasarkita-postgres}"
+  POSTGRES_HOST="${POSTGRES_HOST:-sisdmk-postgres}"
   POSTGRES_PORT="${POSTGRES_PORT:-5432}"
   POSTGRES_DATABASE="${POSTGRES_DATABASE:-si_data}"
-  POSTGRES_USER="${POSTGRES_USER:-pasarkita}"
+  POSTGRES_USER="${POSTGRES_USER:-sisdmk_admin}"
   POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-$POSTGRES_HOST}"
 
   [ -n "${POSTGRES_PASSWORD:-}" ] || {

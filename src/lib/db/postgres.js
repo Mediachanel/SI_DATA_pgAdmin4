@@ -7,6 +7,12 @@ function numberPort(value) {
   return Number.isFinite(port) ? port : 5432;
 }
 
+function numberOption(value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(number)));
+}
+
 function isProduction() {
   return process.env.NODE_ENV === "production";
 }
@@ -272,8 +278,11 @@ export function createPool(config = {}) {
     user: process.env.POSTGRES_USER || process.env.PGUSER || "postgres",
     password: process.env.POSTGRES_PASSWORD || process.env.PGPASSWORD || "",
     database: config.database || process.env.POSTGRES_DATABASE || process.env.PGDATABASE || "si_data",
-    connectionTimeoutMillis: numberPort(process.env.POSTGRES_CONNECT_TIMEOUT_MS || 1500),
-    max: 10
+    connectionTimeoutMillis: numberOption(process.env.POSTGRES_CONNECT_TIMEOUT_MS, 1500, { min: 500, max: 30000 }),
+    idleTimeoutMillis: numberOption(process.env.POSTGRES_IDLE_TIMEOUT_MS, 30000, { min: 1000, max: 300000 }),
+    max: numberOption(process.env.POSTGRES_POOL_MAX, 10, { min: 1, max: 50 }),
+    keepAlive: true,
+    application_name: process.env.POSTGRES_APPLICATION_NAME || "sisdmk2-app"
   });
   return createPostgresCompatPool(pool);
 }
@@ -305,6 +314,7 @@ export async function resetPostgresPools() {
   pools.clear();
   globalThis.__sisdmkPostgresCompatPool = null;
   globalThis.__sisdmkPostgresCompatHost = null;
+  globalThis.__sisdmkPostgresCompatVerifiedAt = 0;
   await Promise.all(entries.map(([, pool]) => pool.end().catch(() => {})));
 }
 
@@ -313,6 +323,29 @@ export async function getConnectedPool() {
   const databases = getPostgresDatabaseCandidates();
   const pools = getPoolMap();
   const errors = [];
+  const selectedPool = globalThis.__sisdmkPostgresCompatPool;
+  const selectedHost = globalThis.__sisdmkPostgresCompatHost;
+  const verifyIntervalMs = numberOption(process.env.POSTGRES_POOL_VERIFY_INTERVAL_MS, 15000, { min: 0, max: 300000 });
+  const lastVerifiedAt = Number(globalThis.__sisdmkPostgresCompatVerifiedAt || 0);
+
+  if (selectedPool && selectedHost) {
+    if (verifyIntervalMs > 0 && Date.now() - lastVerifiedAt < verifyIntervalMs) {
+      return selectedPool;
+    }
+
+    try {
+      await selectedPool.query("SELECT 1");
+      globalThis.__sisdmkPostgresCompatVerifiedAt = Date.now();
+      return selectedPool;
+    } catch (error) {
+      errors.push(`host=${selectedHost} -> ${error.message}`);
+      pools.delete(selectedHost);
+      globalThis.__sisdmkPostgresCompatPool = null;
+      globalThis.__sisdmkPostgresCompatHost = null;
+      globalThis.__sisdmkPostgresCompatVerifiedAt = 0;
+      await selectedPool.end().catch(() => {});
+    }
+  }
 
   for (const candidate of candidates) {
     for (const database of databases) {
@@ -327,6 +360,7 @@ export async function getConnectedPool() {
         await pool.query("SELECT 1");
         globalThis.__sisdmkPostgresCompatPool = pool;
         globalThis.__sisdmkPostgresCompatHost = key;
+        globalThis.__sisdmkPostgresCompatVerifiedAt = Date.now();
         return pool;
       } catch (error) {
         errors.push(`host=${key} -> ${error.message}`);
