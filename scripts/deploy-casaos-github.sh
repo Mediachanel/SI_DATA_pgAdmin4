@@ -451,6 +451,37 @@ sync_source() {
   fi
 }
 
+cleanup_stale_source_artifacts() {
+  cd "$SOURCE_DIR"
+  log "Membersihkan sisa file/folder lama yang tidak perlu deploy..."
+
+  for path in \
+    .next \
+    node_modules \
+    out \
+    deploy \
+    backend \
+    frontend \
+    tmp \
+    .pytest_cache \
+    backup \
+    proposal \
+    "SPBE DATIIN" \
+    stitch \
+    sql \
+    database
+  do
+    if [ -e "$path" ]; then
+      rm -rf -- "$path"
+      log "Dihapus: $path"
+    fi
+  done
+
+  find . -maxdepth 1 -type f \
+    \( -name '*.log' -o -name '*.docx' -o -name '*.xlsx' -o -name '*.pdf' -o -name '*.zip' -o -name '*.tgz' -o -name '*.tar.gz' \) \
+    -delete
+}
+
 connect_container_to_network() {
   container_name="$1"
 
@@ -655,6 +686,7 @@ require_command git
 require_command docker
 
 sync_source
+cleanup_stale_source_artifacts
 auto_detect_postgres_password
 write_env_file
 cp "$APP_DIR/.env.casaos" "$SOURCE_DIR/.env.casaos"
