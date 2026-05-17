@@ -434,7 +434,12 @@ sync_source() {
       git checkout -b "$BRANCH" "origin/$BRANCH"
     fi
 
-    git pull --ff-only origin "$BRANCH"
+    if git merge-base --is-ancestor HEAD "origin/$BRANCH"; then
+      git pull --ff-only origin "$BRANCH"
+    else
+      log "Riwayat source lokal berbeda dari GitHub. Reset source ke origin/$BRANCH..."
+      git reset --hard "origin/$BRANCH"
+    fi
   else
     if [ -e "$SOURCE_DIR" ]; then
       die "$SOURCE_DIR sudah ada tapi bukan repo git."
